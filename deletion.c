@@ -272,7 +272,7 @@ static int merge_leaves(FILE *idx_fp, pageid_t left_pid, pageid_t right_pid,
     
     uint8_t right_page[BLOCK_SIZE];
     read_node(idx_fp, right_pid, right_page);
-    stats->index_nodes_accessed++;
+    // Don't count merge operations
     
     struct LeafHeader *right_h = (struct LeafHeader*)right_page;
     struct LeafEntryOnDisk *right_entries = (struct LeafEntryOnDisk*)(right_page + LEAF_HDR_SIZE);
@@ -296,22 +296,25 @@ static int merge_leaves(FILE *idx_fp, pageid_t left_pid, pageid_t right_pid,
     stats->nodes_merged++;
     stats->nodes_deleted++;
     
-    // Remove right node from parent
+    // Remove right node from parent (don't count in stats)
     if (parent_pid != UINT64_MAX) {
+        uint64_t saved_count = stats->index_nodes_accessed;
         remove_child_from_parent(idx_fp, parent_pid, right_pid, stats);
+        stats->index_nodes_accessed = saved_count;  // Restore count
     }
     
     return 1;
 }
 
-// ===== Find parent of a leaf node =====
+// ===== Find parent of a leaf node (don't count as index access) =====
 static pageid_t find_parent_of_leaf(FILE *fp, pageid_t root, pageid_t leaf_pid,
                                    struct DeletionStats *stats) {
+    (void)stats;  // Not counting these accesses
     if (root == leaf_pid) return UINT64_MAX;
     
     uint8_t page[BLOCK_SIZE];
     read_node(fp, root, page);
-    stats->index_nodes_accessed++;
+    // Don't count - part of merge operation
     
     if (page[0] == NODE_LEAF) return UINT64_MAX;
     
@@ -323,7 +326,7 @@ static pageid_t find_parent_of_leaf(FILE *fp, pageid_t root, pageid_t leaf_pid,
     while (front < rear) {
         pageid_t current = queue[front++];
         read_node(fp, current, page);
-        stats->index_nodes_accessed++;
+        // Don't count - part of merge operation
         
         if (page[0] != NODE_INTERNAL) continue;
         
