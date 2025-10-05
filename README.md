@@ -124,6 +124,9 @@ del _.exe _.obj
 
 ### Stage 1: Storage System
 
+<details>
+<summary>📋 Click to view storage system output</summary>
+
 ```
 
 Loaded 26652 records into the database.
@@ -137,10 +140,14 @@ Record 4: 21/12/2022, 1610612755, 113, 0.441
 Record 5: 21/12/2022, 1610612737, 108, 0.429
 
 ```
+</details>
 
 **Creates:** `database.bin` (~1.3MB)
 
 ### Stage 2: B+ Tree Index
+
+<details>
+<summary>🌳 Click to view B+ tree index output</summary>
 
 ```
 
@@ -161,10 +168,14 @@ Leaf PID=2 has 304 keys
 ...
 
 ```
+</details>
 
 **Creates:** `bpt.idx` (~180KB)
 
 ### Stage 3: Deletion with Statistics
+
+<details>
+<summary>🗑️ Click to view deletion statistics output</summary>
 
 ```
 
@@ -216,6 +227,7 @@ Expected: 85 keys for 85 leaf nodes (N-1 rule)
 Tree structure maintained with proper N-1 key count
 
 ````
+</details>
 
 ## 📊 Understanding the Results
 
