@@ -113,12 +113,10 @@ deletion.exe database.bin bpt.idx
 
 ### Windows (MSVC)
 
+```cmd
 # Clean build
-
-del _.exe _.obj
-
+del *.exe *.obj
 ```
-
 
 ## 🎯 Expected Output
 
@@ -128,7 +126,6 @@ del _.exe _.obj
 <summary>📋 Click to view storage system output</summary>
 
 ```
-
 Loaded 26652 records into the database.
 Total blocks used: 314
 Size of each record: 48 bytes
@@ -138,8 +135,8 @@ Record 2: 22/12/2022, 1610612762, 120, 0.488
 Record 3: 21/12/2022, 1610612739, 114, 0.482
 Record 4: 21/12/2022, 1610612755, 113, 0.441
 Record 5: 21/12/2022, 1610612737, 108, 0.429
-
 ```
+
 </details>
 
 **Creates:** `database.bin` (~1.3MB)
@@ -150,7 +147,6 @@ Record 5: 21/12/2022, 1610612737, 108, 0.429
 <summary>🌳 Click to view B+ tree index output</summary>
 
 ```
-
 B+ tree built.
 Filtered out null keys: 0
 Input records used: 26651
@@ -166,8 +162,8 @@ Leaf PID=0 has 304 keys
 Leaf PID=1 has 304 keys
 Leaf PID=2 has 304 keys
 ...
-
 ```
+
 </details>
 
 **Creates:** `bpt.idx` (~180KB)
@@ -178,13 +174,12 @@ Leaf PID=2 has 304 keys
 <summary>🗑️ Click to view deletion statistics output</summary>
 
 ```
-
 Step 3: Running deletion...
 === Task 3: Delete records with FT_PCT_home > 0.9 ===
 Using COMPLETE B+ tree deletion:
-ΓÇó Delete empty nodes (not just mark them)
-ΓÇó Update parent keys when children removed
-ΓÇó Maintain 90% fill factor (min: 304 entries/leaf)
+• Delete empty nodes (not just mark them)
+• Update parent keys when children removed
+• Maintain 90% fill factor (min: 304 entries/leaf)
 
 === Initial B+ Tree Statistics ===
 Leaf nodes : 88
@@ -225,11 +220,11 @@ Expected: 85 keys for 85 leaf nodes (N-1 rule)
 3 nodes DELETED (zeroed out)
 3 parent keys UPDATED
 Tree structure maintained with proper N-1 key count
+```
 
-````
 </details>
 
-## 📊 Understanding the Results
+## 📊 Key Statistics
 
 | Metric                        | Description                          | Observed Value      |
 | ----------------------------- | ------------------------------------ | ------------------- |
@@ -249,12 +244,12 @@ Tree structure maintained with proper N-1 key count
 | Total entries after deletion  | Remaining records in tree            | 25,684              |
 | Average entries per leaf      | Entries per leaf post-deletion       | 302.2               |
 
+## ⚡ Performance Summary
 
-⚡ Performance Summary
-B+ Tree Efficiency: Slightly slower than brute force for this small deletion batch.
-Index Access: Only 88 nodes accessed vs 314 data blocks.
-Memory Usage: Efficient 4KB disk-based node storage.
-Tree Maintenance: Proper node deletion and parent key updates maintain correct N-1 key structure.
+- **B+ Tree Efficiency:** Slightly slower than brute force for this small deletion batch
+- **Index Access:** Only 88 nodes accessed vs 314 data blocks
+- **Memory Usage:** Efficient 4KB disk-based node storage
+- **Tree Maintenance:** Proper node deletion and parent key updates maintain correct N-1 key structure
 
 ## 🛠️ Troubleshooting
 
@@ -266,7 +261,7 @@ Tree Maintenance: Proper node deletion and parent key updates maintain correct N
 # Solution: Use Developer Command Prompt
 # Or run this in regular cmd:
 "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
-````
+```
 
 #### "games.txt not found"
 
