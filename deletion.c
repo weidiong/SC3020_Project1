@@ -91,6 +91,7 @@ struct DeletionStats {
     uint64_t entries_removed_from_index;
     uint64_t nodes_deleted;
     uint64_t parent_keys_updated;
+    const char *method_name;
 };
 
 // Track unique blocks accessed
@@ -345,8 +346,128 @@ static pageid_t find_parent_of_leaf(FILE *fp, pageid_t root, pageid_t leaf_pid,
     return UINT64_MAX;
 }
 
-// ===== B+ Tree deletion =====
-static void delete_from_btree(FILE *idx_fp, FILE *db_fp, float threshold,
+// ===== Search for first key >= threshold (index-based) =====
+static pageid_t search_for_first_key(FILE *idx_fp, pageid_t root, float threshold,
+                                     struct DeletionStats *stats) {
+    (void)stats;  // Unused but kept for consistency
+    uint8_t page[BLOCK_SIZE];
+    pageid_t current = root;
+    
+    // Navigate down the tree searching for first key >= threshold
+    while (1) {
+        read_node(idx_fp, current, page);
+        mark_index_node_accessed(current);
+        
+        uint8_t node_type = page[0];
+        
+        if (node_type == NODE_LEAF) {
+            return current;
+        }
+        
+        // Internal node - find appropriate child
+        struct InternalHeader *h = (struct InternalHeader*)page;
+        uint8_t *p = page + INTERNAL_HDR_SIZE;
+        
+        // Start with first child
+        pageid_t next_child;
+        memcpy(&next_child, p, sizeof(pageid_t));
+        p += sizeof(pageid_t);
+        
+        // Check each separator key
+        for (uint32_t i = 0; i < h->num_keys; i++) {
+            float sep_key;
+            memcpy(&sep_key, p, sizeof(float));
+            
+            if (threshold <= sep_key) {
+                // Threshold is <= this separator, so go to child before it
+                break;
+            }
+            
+            // Move to next child
+            p += sizeof(float);
+            memcpy(&next_child, p, sizeof(pageid_t));
+            p += sizeof(pageid_t);
+        }
+        
+        current = next_child;
+    }
+}
+
+// ===== B+ Tree deletion (Index-based search) =====
+static void delete_from_btree_indexed(FILE *idx_fp, FILE *db_fp, float threshold,
+                                      struct DeletionStats *stats) {
+    pageid_t root = find_root(idx_fp);
+    if (root == UINT64_MAX) {
+        printf("Error: Root node not found\n");
+        return;
+    }
+    
+    // Search for first leaf that might contain keys > threshold
+    pageid_t leaf_pid = search_for_first_key(idx_fp, root, threshold, stats);
+    
+    uint8_t page[BLOCK_SIZE];
+    
+    // Process leaves starting from the one containing threshold
+    int found_any = 0;
+    while (leaf_pid != UINT64_MAX) {
+        read_node(idx_fp, leaf_pid, page);
+        mark_index_node_accessed(leaf_pid);
+        
+        struct LeafHeader *h = (struct LeafHeader*)page;
+        struct LeafEntryOnDisk *entries = (struct LeafEntryOnDisk*)(page + LEAF_HDR_SIZE);
+        
+        int modified = 0;
+        int has_larger_keys = 0;
+        pageid_t next_leaf = h->next_leaf;
+        
+        // Remove matching entries (iterate backwards for safe deletion)
+        for (int32_t i = (int32_t)h->num_keys - 1; i >= 0; i--) {
+            if (entries[i].key > threshold) {
+                delete_record_from_database(db_fp, entries[i].rid);
+                stats->games_deleted++;
+                stats->avg_ft_pct_deleted += entries[i].key;
+                
+                remove_entry_from_leaf(page, (uint32_t)i);
+                stats->entries_removed_from_index++;
+                modified = 1;
+                found_any = 1;
+                has_larger_keys = 1;
+            }
+        }
+        
+        if (modified) {
+            write_node(idx_fp, leaf_pid, page);
+            
+            // Check if underfull and should merge
+            if (h->num_keys < leaf_min_entries() && !h->is_root && next_leaf != UINT64_MAX) {
+                // Find parent
+                pageid_t parent = find_parent_of_leaf(idx_fp, root, leaf_pid, stats);
+                
+                // Try to merge with next sibling
+                if (merge_leaves(idx_fp, leaf_pid, next_leaf, parent, page, stats)) {
+                    // Successfully merged - re-read to get updated next_leaf
+                    read_node(idx_fp, leaf_pid, page);
+                    h = (struct LeafHeader*)page;
+                    next_leaf = h->next_leaf;
+                }
+            }
+        }
+        
+        // If we've processed keys and found none in this leaf, we can stop
+        // (since keys are sorted and we're past the threshold range)
+        if (found_any && !has_larger_keys) {
+            break;
+        }
+        
+        leaf_pid = next_leaf;
+    }
+    
+    stats->data_blocks_accessed = num_accessed_blocks;
+    stats->index_nodes_accessed = num_accessed_index_nodes;
+}
+
+// ===== B+ Tree deletion (Sequential scan - original method) =====
+static void delete_from_btree_sequential(FILE *idx_fp, FILE *db_fp, float threshold,
                              struct DeletionStats *stats) {
     pageid_t root = find_root(idx_fp);
     if (root == UINT64_MAX) {
@@ -424,6 +545,7 @@ static void delete_from_btree(FILE *idx_fp, FILE *db_fp, float threshold,
 
 // ===== Brute force comparison =====
 static void brute_force_scan(FILE *db_fp, float threshold, struct DeletionStats *stats) {
+    (void)threshold;  // Not used in scan, only for reference
     fseek(db_fp, 0, SEEK_END);
     long file_size = ftell(db_fp);
     uint64_t num_blocks = file_size / BLOCK_SIZE;
@@ -518,6 +640,51 @@ static void print_root_keys(FILE *fp, pageid_t root_pid) {
     }
 }
 
+// ===== Helper: Save database and index state =====
+static void save_files(const char *db_src, const char *idx_src, 
+                      const char *db_dst, const char *idx_dst) {
+    FILE *src, *dst;
+    char buffer[8192];
+    size_t bytes;
+    
+    // Copy database
+    src = fopen(db_src, "rb");
+    dst = fopen(db_dst, "wb");
+    while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
+        fwrite(buffer, 1, bytes, dst);
+    }
+    fclose(src);
+    fclose(dst);
+    
+    // Copy index
+    src = fopen(idx_src, "rb");
+    dst = fopen(idx_dst, "wb");
+    while ((bytes = fread(buffer, 1, sizeof(buffer), src)) > 0) {
+        fwrite(buffer, 1, bytes, dst);
+    }
+    fclose(src);
+    fclose(dst);
+}
+
+static void restore_files(const char *db_src, const char *idx_src,
+                         const char *db_dst, const char *idx_dst) {
+    save_files(db_src, idx_src, db_dst, idx_dst);
+}
+
+// ===== Helper: Print deletion statistics =====
+static void print_deletion_stats(struct DeletionStats *stats) {
+    printf("\n=== %s Statistics ===\n", stats->method_name);
+    printf("Index nodes accessed         : %llu\n", (unsigned long long)stats->index_nodes_accessed);
+    printf("Data blocks accessed         : %llu\n", (unsigned long long)stats->data_blocks_accessed);
+    printf("Games deleted                : %llu\n", (unsigned long long)stats->games_deleted);
+    printf("Entries removed from index   : %llu\n", (unsigned long long)stats->entries_removed_from_index);
+    printf("Nodes merged                 : %llu\n", (unsigned long long)stats->nodes_merged);
+    printf("Nodes actually DELETED       : %llu\n", (unsigned long long)stats->nodes_deleted);
+    printf("Parent keys updated          : %llu\n", (unsigned long long)stats->parent_keys_updated);
+    printf("Average FT_PCT_home deleted  : %.3f\n", stats->avg_ft_pct_deleted);
+    printf("Running time                 : %.6f seconds\n", stats->running_time_seconds);
+}
+
 // ===== Main =====
 int main(int argc, char **argv) {
     if (argc < 3) {
@@ -527,104 +694,164 @@ int main(int argc, char **argv) {
     
     const char *db_path = argv[1];
     const char *idx_path = argv[2];
+    const char *db_backup = "database.bin.backup";
+    const char *idx_backup = "bpt.idx.backup";
     
-    FILE *db_fp = fopen(db_path, "rb+");
-    if (!db_fp) {
-        fprintf(stderr, "Error opening database file: %s\n", strerror(errno));
-        return 1;
-    }
-    
-    FILE *idx_fp = fopen(idx_path, "rb+");
-    if (!idx_fp) {
-        fprintf(stderr, "Error opening index file: %s\n", strerror(errno));
-        fclose(db_fp);
-        return 1;
-    }
-    
-    struct DeletionStats stats = {0};
     float threshold = 0.9f;
     
-    printf("=== Task 3: Delete records with FT_PCT_home > %.1f ===\n", threshold);
-    printf("Using COMPLETE B+ tree deletion:\n");
-    printf("  • Delete empty nodes (not just mark them)\n");
-    printf("  • Update parent keys when children removed\n");
-    printf("  • Maintain 90%% fill factor (min: %u entries/leaf)\n\n", leaf_min_entries());
+    printf("=== Task 3: Delete records with FT_PCT_home > %.1f ===\n\n", threshold);
+    printf("Comparing two deletion methods:\n");
+    printf("  Method 1: INDEX-BASED SEARCH (optimized)\n");
+    printf("  Method 2: SEQUENTIAL SCAN (original)\n");
+    printf("  • Both delete empty nodes and update parent keys\n");
+    printf("  • Both maintain 90%% fill factor (min: %u entries/leaf)\n\n", leaf_min_entries());
     
+    // Save initial state
+    printf("Saving initial database and index state...\n");
+    save_files(db_path, idx_path, db_backup, idx_backup);
+    
+    // Open files for Method 1
+    FILE *db_fp = fopen(db_path, "rb+");
+    FILE *idx_fp = fopen(idx_path, "rb+");
+    
+    // Get initial statistics
+    pageid_t root = find_root(idx_fp);
+    struct BTreeStats bt_stats_initial = {0};
+    if (root != UINT64_MAX) {
+        traverse_btree(idx_fp, root, 1, &bt_stats_initial);
+        
+        printf("\n=== Initial B+ Tree Statistics ===\n");
+        printf("Leaf nodes    : %llu\n", (unsigned long long)bt_stats_initial.num_leaves);
+        printf("Internal nodes: %llu\n", (unsigned long long)bt_stats_initial.num_internals);
+        printf("Tree height   : %llu levels\n", (unsigned long long)bt_stats_initial.max_level);
+        printf("Total entries : %llu\n", (unsigned long long)bt_stats_initial.total_entries);
+    }
+    
+    // ========== METHOD 1: INDEX-BASED SEARCH ==========
+    printf("\n");
+    printf("═══════════════════════════════════════════════════════\n");
+    printf("         METHOD 1: INDEX-BASED SEARCH\n");
+    printf("═══════════════════════════════════════════════════════\n");
+    
+    struct DeletionStats stats1 = {0};
+    stats1.method_name = "Index-Based Search";
     num_accessed_blocks = 0;
     num_accessed_index_nodes = 0;
     
-    pageid_t root = find_root(idx_fp);
-    if (root != UINT64_MAX) {
-        struct BTreeStats bt_stats_before = {0};
-        traverse_btree(idx_fp, root, 1, &bt_stats_before);
-        
-        printf("=== Initial B+ Tree Statistics ===\n");
-        printf("Leaf nodes    : %llu\n", (unsigned long long)bt_stats_before.num_leaves);
-        printf("Internal nodes: %llu\n", (unsigned long long)bt_stats_before.num_internals);
-        printf("Tree height   : %llu levels\n", (unsigned long long)bt_stats_before.max_level);
-        printf("Total entries : %llu\n\n", (unsigned long long)bt_stats_before.total_entries);
-    }
-    
     clock_t start = clock();
-    delete_from_btree(idx_fp, db_fp, threshold, &stats);
+    delete_from_btree_indexed(idx_fp, db_fp, threshold, &stats1);
     clock_t end = clock();
-    stats.running_time_seconds = ((double)(end - start)) / CLOCKS_PER_SEC;
+    stats1.running_time_seconds = ((double)(end - start)) / CLOCKS_PER_SEC;
     
-    if (stats.games_deleted > 0) {
-        stats.avg_ft_pct_deleted /= stats.games_deleted;
+    if (stats1.games_deleted > 0) {
+        stats1.avg_ft_pct_deleted /= stats1.games_deleted;
     }
     
-    start = clock();
-    brute_force_scan(db_fp, threshold, &stats);
-    end = clock();
-    stats.brute_force_time = ((double)(end - start)) / CLOCKS_PER_SEC;
+    print_deletion_stats(&stats1);
     
-    printf("=== B+ Tree Deletion Statistics ===\n");
-    printf("Index nodes accessed         : %llu\n", (unsigned long long)stats.index_nodes_accessed);
-    printf("Data blocks accessed         : %llu\n", (unsigned long long)stats.data_blocks_accessed);
-    printf("Games deleted                : %llu\n", (unsigned long long)stats.games_deleted);
-    printf("Entries removed from index   : %llu\n", (unsigned long long)stats.entries_removed_from_index);
-    printf("Nodes merged                 : %llu\n", (unsigned long long)stats.nodes_merged);
-    printf("Nodes actually DELETED       : %llu\n", (unsigned long long)stats.nodes_deleted);
-    printf("Parent keys updated          : %llu\n", (unsigned long long)stats.parent_keys_updated);
-    printf("Average FT_PCT_home deleted  : %.3f\n", stats.avg_ft_pct_deleted);
-    printf("Running time                 : %.6f seconds\n", stats.running_time_seconds);
-    
-    printf("\n=== Brute Force Comparison ===\n");
-    printf("Data blocks accessed (brute force): %llu\n", (unsigned long long)stats.brute_force_blocks);
-    printf("Running time (brute force)        : %.6f seconds\n", stats.brute_force_time);
-    if (stats.brute_force_time > 0) {
-        printf("Speedup                           : %.2fx\n", stats.brute_force_time / stats.running_time_seconds);
-    }
-    
+    // Get final statistics for Method 1
     root = find_root(idx_fp);
+    struct BTreeStats bt_stats_after1 = {0};
     if (root != UINT64_MAX) {
-        struct BTreeStats bt_stats_after = {0};
-        traverse_btree(idx_fp, root, 1, &bt_stats_after);
+        traverse_btree(idx_fp, root, 1, &bt_stats_after1);
         
-        printf("\n=== Updated B+ Tree Statistics ===\n");
+        printf("\n=== Final B+ Tree State (Method 1) ===\n");
         printf("Leaf nodes    : %llu (was %llu)\n", 
-               (unsigned long long)bt_stats_after.num_leaves,
-               (unsigned long long)(bt_stats_after.num_leaves + stats.nodes_deleted));
-        printf("Internal nodes: %llu\n", (unsigned long long)bt_stats_after.num_internals);
-        printf("Total nodes   : %llu\n", (unsigned long long)(bt_stats_after.num_leaves + bt_stats_after.num_internals));
-        printf("Empty nodes   : %llu\n", (unsigned long long)bt_stats_after.empty_nodes);
-        printf("Tree height   : %llu levels\n", (unsigned long long)bt_stats_after.max_level);
-        printf("Total entries : %llu\n", (unsigned long long)bt_stats_after.total_entries);
-        printf("Avg entries/leaf: %.1f\n",
-               bt_stats_after.num_leaves > 0 ?
-               (double)bt_stats_after.total_entries / bt_stats_after.num_leaves : 0.0);
-        
-        print_root_keys(idx_fp, root);
+               (unsigned long long)bt_stats_after1.num_leaves,
+               (unsigned long long)bt_stats_initial.num_leaves);
+        printf("Total entries : %llu (was %llu)\n", 
+               (unsigned long long)bt_stats_after1.total_entries,
+               (unsigned long long)bt_stats_initial.total_entries);
     }
     
     fclose(db_fp);
     fclose(idx_fp);
     
-    printf("\n=== Deletion complete! ===\n");
-    printf("✓ %llu nodes DELETED (zeroed out)\n", (unsigned long long)stats.nodes_deleted);
-    printf("✓ %llu parent keys UPDATED\n", (unsigned long long)stats.parent_keys_updated);
-    printf("✓ Tree structure maintained with proper N-1 key count\n");
+    // ========== METHOD 2: SEQUENTIAL SCAN ==========
+    printf("\n");
+    printf("═══════════════════════════════════════════════════════\n");
+    printf("         METHOD 2: SEQUENTIAL SCAN\n");
+    printf("═══════════════════════════════════════════════════════\n");
+    printf("Restoring database to initial state...\n\n");
+    
+    // Restore files
+    restore_files(db_backup, idx_backup, db_path, idx_path);
+    
+    // Reopen files for Method 2
+    db_fp = fopen(db_path, "rb+");
+    idx_fp = fopen(idx_path, "rb+");
+    
+    struct DeletionStats stats2 = {0};
+    stats2.method_name = "Sequential Scan";
+    num_accessed_blocks = 0;
+    num_accessed_index_nodes = 0;
+    
+    start = clock();
+    delete_from_btree_sequential(idx_fp, db_fp, threshold, &stats2);
+    end = clock();
+    stats2.running_time_seconds = ((double)(end - start)) / CLOCKS_PER_SEC;
+    
+    if (stats2.games_deleted > 0) {
+        stats2.avg_ft_pct_deleted /= stats2.games_deleted;
+    }
+    
+    print_deletion_stats(&stats2);
+    
+    // Get final statistics for Method 2
+    root = find_root(idx_fp);
+    struct BTreeStats bt_stats_after2 = {0};
+    if (root != UINT64_MAX) {
+        traverse_btree(idx_fp, root, 1, &bt_stats_after2);
+        
+        printf("\n=== Final B+ Tree State (Method 2) ===\n");
+        printf("Leaf nodes    : %llu (was %llu)\n", 
+               (unsigned long long)bt_stats_after2.num_leaves,
+               (unsigned long long)bt_stats_initial.num_leaves);
+        printf("Total entries : %llu (was %llu)\n", 
+               (unsigned long long)bt_stats_after2.total_entries,
+               (unsigned long long)bt_stats_initial.total_entries);
+        print_root_keys(idx_fp, root);
+    }
+    
+    // ========== COMPARISON ==========
+    printf("\n");
+    printf("═══════════════════════════════════════════════════════\n");
+    printf("                    COMPARISON\n");
+    printf("═══════════════════════════════════════════════════════\n");
+    printf("%-30s %15s %15s %15s\n", "Metric", "Index-Based", "Sequential", "Improvement");
+    printf("%-30s %15s %15s %15s\n", "------------------------------", "-------------", "-------------", "-------------");
+    printf("%-30s %15llu %15llu %14.2fx\n", "Index nodes accessed:", 
+           (unsigned long long)stats1.index_nodes_accessed,
+           (unsigned long long)stats2.index_nodes_accessed,
+           (double)stats2.index_nodes_accessed / (double)stats1.index_nodes_accessed);
+    printf("%-30s %15llu %15llu %14.2fx\n", "Data blocks accessed:",
+           (unsigned long long)stats1.data_blocks_accessed,
+           (unsigned long long)stats2.data_blocks_accessed,
+           stats1.data_blocks_accessed > 0 ? (double)stats2.data_blocks_accessed / (double)stats1.data_blocks_accessed : 1.0);
+    printf("%-30s %12.6fs %12.6fs %14.2fx\n", "Running time:",
+           stats1.running_time_seconds,
+           stats2.running_time_seconds,
+           stats2.running_time_seconds / stats1.running_time_seconds);
+    
+    // Brute force comparison
+    start = clock();
+    struct DeletionStats bf_stats = {0};
+    brute_force_scan(db_fp, threshold, &bf_stats);
+    end = clock();
+    double bf_time = ((double)(end - start)) / CLOCKS_PER_SEC;
+    
+    printf("\n=== Brute Force Baseline ===\n");
+    printf("Data blocks accessed: %llu\n", (unsigned long long)bf_stats.brute_force_blocks);
+    printf("Running time        : %.6f seconds\n", bf_time);
+    
+    fclose(db_fp);
+    fclose(idx_fp);
+    
+    printf("\n=== Comparison complete! ===\n");
+    printf("Index-based search is %.2fx faster than sequential scan\n",
+           stats2.running_time_seconds / stats1.running_time_seconds);
+    printf("Index-based search accesses %.2fx fewer index nodes\n",
+           (double)stats2.index_nodes_accessed / (double)stats1.index_nodes_accessed);
     
     return 0;
 }
