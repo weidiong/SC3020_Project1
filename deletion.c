@@ -12,7 +12,6 @@
 #include <time.h>
 
 #define BLOCK_SIZE 4096u
-#define MAX_PATH_DEPTH 10
 
 // ===== Storage header =====
 #pragma pack(push, 1)
@@ -112,6 +111,24 @@ static void mark_block_accessed(uint32_t block_no) {
     }
 }
 
+// Track unique index nodes accessed
+#define MAX_INDEX_NODES 1024
+static pageid_t accessed_index_nodes[MAX_INDEX_NODES];
+static size_t num_accessed_index_nodes = 0;
+
+static int index_node_already_accessed(pageid_t node_pid) {
+    for (size_t i = 0; i < num_accessed_index_nodes; i++) {
+        if (accessed_index_nodes[i] == node_pid) return 1;
+    }
+    return 0;
+}
+
+static void mark_index_node_accessed(pageid_t node_pid) {
+    if (!index_node_already_accessed(node_pid) && num_accessed_index_nodes < MAX_INDEX_NODES) {
+        accessed_index_nodes[num_accessed_index_nodes++] = node_pid;
+    }
+}
+
 // ===== Global root tracking =====
 static pageid_t g_root_pid = UINT64_MAX;
 
@@ -154,39 +171,11 @@ static pageid_t find_root(FILE *fp) {
     return UINT64_MAX;
 }
 
-// ===== Find child index in parent =====
-static int find_child_index_in_parent(FILE *fp, pageid_t parent_pid, pageid_t child_pid,
-                                     struct DeletionStats *stats) {
-    uint8_t page[BLOCK_SIZE];
-    read_node(fp, parent_pid, page);
-    stats->index_nodes_accessed++;
-    
-    struct InternalHeader *h = (struct InternalHeader*)page;
-    uint8_t *p = page + INTERNAL_HDR_SIZE;
-    
-    // Check first pointer
-    pageid_t ptr;
-    memcpy(&ptr, p, sizeof(pageid_t));
-    if (ptr == child_pid) return 0;
-    p += sizeof(pageid_t);
-    
-    // Check remaining pointers
-    for (uint32_t i = 0; i < h->num_keys; i++) {
-        p += sizeof(float);
-        memcpy(&ptr, p, sizeof(pageid_t));
-        if (ptr == child_pid) return i + 1;
-        p += sizeof(pageid_t);
-    }
-    
-    return -1;
-}
-
-// ===== Remove child from parent and return if parent needs attention =====
+// ===== Remove child from parent (called during merge, not counted separately) =====
 static int remove_child_from_parent(FILE *fp, pageid_t parent_pid, pageid_t child_pid,
                                    struct DeletionStats *stats) {
     uint8_t page[BLOCK_SIZE];
     read_node(fp, parent_pid, page);
-    stats->index_nodes_accessed++;
     
     struct InternalHeader *h = (struct InternalHeader*)page;
     uint8_t *p = page + INTERNAL_HDR_SIZE;
@@ -267,12 +256,13 @@ static void remove_entry_from_leaf(uint8_t *page, uint32_t entry_idx) {
 static int merge_leaves(FILE *idx_fp, pageid_t left_pid, pageid_t right_pid,
                        pageid_t parent_pid, uint8_t *left_page,
                        struct DeletionStats *stats) {
+    (void)stats;  // Unused in this simplified version
     struct LeafHeader *left_h = (struct LeafHeader*)left_page;
     struct LeafEntryOnDisk *left_entries = (struct LeafEntryOnDisk*)(left_page + LEAF_HDR_SIZE);
     
     uint8_t right_page[BLOCK_SIZE];
     read_node(idx_fp, right_pid, right_page);
-    // Don't count merge operations
+    mark_index_node_accessed(right_pid);  // Count the right node being accessed
     
     struct LeafHeader *right_h = (struct LeafHeader*)right_page;
     struct LeafEntryOnDisk *right_entries = (struct LeafEntryOnDisk*)(right_page + LEAF_HDR_SIZE);
@@ -296,11 +286,9 @@ static int merge_leaves(FILE *idx_fp, pageid_t left_pid, pageid_t right_pid,
     stats->nodes_merged++;
     stats->nodes_deleted++;
     
-    // Remove right node from parent (don't count in stats)
+    // Remove right node from parent
     if (parent_pid != UINT64_MAX) {
-        uint64_t saved_count = stats->index_nodes_accessed;
         remove_child_from_parent(idx_fp, parent_pid, right_pid, stats);
-        stats->index_nodes_accessed = saved_count;  // Restore count
     }
     
     return 1;
@@ -368,7 +356,7 @@ static void delete_from_btree(FILE *idx_fp, FILE *db_fp, float threshold,
     
     uint8_t page[BLOCK_SIZE];
     read_node(idx_fp, root, page);
-    stats->index_nodes_accessed++;
+    mark_index_node_accessed(root);  // Track unique index nodes
     
     pageid_t leaf_pid = root;
     
@@ -376,7 +364,7 @@ static void delete_from_btree(FILE *idx_fp, FILE *db_fp, float threshold,
     if (page[0] == NODE_INTERNAL) {
         while (1) {
             read_node(idx_fp, leaf_pid, page);
-            stats->index_nodes_accessed++;
+            mark_index_node_accessed(leaf_pid);  // Track unique index nodes
             
             if (page[0] == NODE_LEAF) break;
             
@@ -386,10 +374,9 @@ static void delete_from_btree(FILE *idx_fp, FILE *db_fp, float threshold,
     }
     
     // Process all leaves
-    pageid_t prev_leaf_pid = UINT64_MAX;
     while (leaf_pid != UINT64_MAX) {
         read_node(idx_fp, leaf_pid, page);
-        stats->index_nodes_accessed++;
+        mark_index_node_accessed(leaf_pid);  // Track unique index nodes
         
         struct LeafHeader *h = (struct LeafHeader*)page;
         struct LeafEntryOnDisk *entries = (struct LeafEntryOnDisk*)(page + LEAF_HDR_SIZE);
@@ -428,11 +415,11 @@ static void delete_from_btree(FILE *idx_fp, FILE *db_fp, float threshold,
             }
         }
         
-        prev_leaf_pid = leaf_pid;
         leaf_pid = next_leaf;
     }
     
     stats->data_blocks_accessed = num_accessed_blocks;
+    stats->index_nodes_accessed = num_accessed_index_nodes;  
 }
 
 // ===== Brute force comparison =====
@@ -564,6 +551,7 @@ int main(int argc, char **argv) {
     printf("  • Maintain 90%% fill factor (min: %u entries/leaf)\n\n", leaf_min_entries());
     
     num_accessed_blocks = 0;
+    num_accessed_index_nodes = 0;
     
     pageid_t root = find_root(idx_fp);
     if (root != UINT64_MAX) {
