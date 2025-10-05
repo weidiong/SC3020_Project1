@@ -2,26 +2,28 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <stdint.h>
 
 
 #define BLOCK_SIZE 4096 // 4KB is the typical size of a block
 #define RECORD_SIZE 48  // size of each record, justified the bytes for each data type in the report doc, mainly 4 for each int/float and 16 for char[16]
-#define MAX_RECORDS_PER_BLOCK ((BLOCK_SIZE - sizeof(int)) / RECORD_SIZE)  // 85
+#define MAX_RECORDS_PER_BLOCK ((BLOCK_SIZE - sizeof(uint32_t)) / RECORD_SIZE)  // 85
 #define BUFFER_POOL_SIZE 10 
 
 
+#pragma pack(push, 1)
 typedef struct {
-   char game_date_est[16];
-   int team_id_home;
-   int pts_home;
-   float fg_pct_home;
-   float ft_pct_home;
-   float fg3_pct_home;
-   int ast_home;
-   int reb_home;
-   int home_team_wins;
-
-} Record; // main structure for each nba game record, using fixed lengths to keep things efficient. 
+   char GAME_DATE_EST[16];
+   int32_t TEAM_ID_home;
+   int32_t PTS_home;
+   float FG_PCT_home;
+   float FT_PCT_home;
+   float FG3_PCT_home;
+   int32_t AST_home;
+   int32_t REB_home;
+   int32_t HOME_TEAM_WINS;
+} Record; // 48 bytes
+#pragma pack(pop) 
 
 
 
@@ -174,7 +176,7 @@ BufferFrame *load_block(BufferPool *pool, int block_id) {
    size_t read = fread(frame->data, 1, BLOCK_SIZE, pool->db_file);
    if (read < BLOCK_SIZE) {
        memset(frame->data + read, 0, BLOCK_SIZE - read); // zero out unused space
-       *(int *)frame->data = 0; // initialize num_records to 0 for new blocks
+       *(uint32_t *)frame->data = 0; // initialize num_records to 0 for new blocks
    }
    frame->block_id = block_id;
    frame->dirty = 0;
@@ -197,12 +199,12 @@ void write_record(BufferPool *pool, Record *rec, int block_id, int offset) {
 
    BufferFrame *frame = load_block(pool, block_id);
    frame->pin_count++;
-   int *num_records = (int *)frame->data;
+   uint32_t *num_records = (uint32_t *)frame->data;
    if (offset >= MAX_RECORDS_PER_BLOCK) {
        fprintf(stderr, "Offset out of bounds\n");
        exit(1);
    }
-   memcpy(frame->data + sizeof(int) + offset * RECORD_SIZE, rec, RECORD_SIZE);
+   memcpy(frame->data + sizeof(uint32_t) + offset * RECORD_SIZE, rec, RECORD_SIZE);
    *num_records = offset + 1; // forcefully set num_records to the current offset + 1
    frame->dirty = 1; // explicitly mark as dirty
    frame->pin_count--;
@@ -211,13 +213,13 @@ void write_record(BufferPool *pool, Record *rec, int block_id, int offset) {
 Record *read_record(BufferPool *pool, int block_id, int offset) {
    BufferFrame *frame = load_block(pool, block_id);
    frame->pin_count++;
-   int *num_records = (int *)frame->data;
+   uint32_t *num_records = (uint32_t *)frame->data;
    if (offset >= *num_records) {
        frame->pin_count--;
        return NULL;
    }
    Record *rec = malloc(RECORD_SIZE);
-   memcpy(rec, frame->data + sizeof(int) + offset * RECORD_SIZE, RECORD_SIZE);
+   memcpy(rec, frame->data + sizeof(uint32_t) + offset * RECORD_SIZE, RECORD_SIZE);
    frame->pin_count--;
    return rec;
 }
@@ -267,8 +269,8 @@ void database_controller_load(BufferPool *pool, const char *txt_file) {
    while (fgets(line, sizeof(line), data_file)) {
        Record rec;
        memset(&rec, 0, RECORD_SIZE);
-       sscanf(line, "%15s\t%d\t%d\t%f\t%f\t%f\t%d\t%d\t%d", rec.game_date_est, &rec.team_id_home, &rec.pts_home,
-              &rec.fg_pct_home, &rec.ft_pct_home, &rec.fg3_pct_home, &rec.ast_home, &rec.reb_home, &rec.home_team_wins);
+       sscanf(line, "%15s\t%d\t%d\t%f\t%f\t%f\t%d\t%d\t%d", rec.GAME_DATE_EST, &rec.TEAM_ID_home, &rec.PTS_home,
+              &rec.FG_PCT_home, &rec.FT_PCT_home, &rec.FG3_PCT_home, &rec.AST_home, &rec.REB_home, &rec.HOME_TEAM_WINS);
        write_record(pool, &rec, block_id, offset);
        offset++;
        if (offset >= MAX_RECORDS_PER_BLOCK) {
@@ -293,12 +295,12 @@ int main() {
    
    // verify the first block by printing the first few records to confirm that the code works 
    BufferFrame *first_frame = load_block(&pool, 0);
-   int *num_records = (int *)first_frame->data;
+   uint32_t *num_records = (uint32_t *)first_frame->data;
    printf("Sample of first block (up to 5 records):\n");
    for (int i = 0; i < *num_records && i < 5; i++) {
        Record *rec = read_record(&pool, 0, i);
        if (rec) {
-           printf("  Record %d: %s, %d, %d, %.3f\n", i + 1, rec->game_date_est, rec->team_id_home, rec->pts_home, rec->fg_pct_home);
+           printf("  Record %d: %s, %d, %d, %.3f\n", i + 1, rec->GAME_DATE_EST, rec->TEAM_ID_home, rec->PTS_home, rec->FG_PCT_home);
            free(rec);
 
 
@@ -307,5 +309,6 @@ int main() {
 
 
    flush_buffer_pool(&pool);
+   fclose(pool.db_file);
    return 0;
 }
