@@ -11,7 +11,7 @@
 #include <errno.h>
 
 #define BLOCK_SIZE 4096u
-#define KEY_SIZE 4
+
 
 // ===== Storage header =====
 #pragma pack(push, 1)
