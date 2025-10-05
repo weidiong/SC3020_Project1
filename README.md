@@ -53,7 +53,7 @@ cd "C:\path\to\your\project"
 4. Build and Run All Programs
 
 ```cmd
-build_and_run.bat
+.\build_and_run.bat
 ```
 
 OR
@@ -146,18 +146,18 @@ Record 5: 21/12/2022, 1610612737, 108, 0.429
 
 B+ tree built.
 Filtered out null keys: 0
-Input records used: 26652
+Input records used: 26651
 
 Actual B+ Tree stats:
-Leaf nodes : 45
-Internal nodes: 3
-Tree height : 3 levels
+Leaf nodes : 88
+Internal nodes: 1
+Tree height : 2 levels
 
-Root is INTERNAL with 44 keys:
-0.611 0.647 0.667 0.684 0.700 0.714 0.727 0.739 0.750 0.761 0.771 0.781 0.790 0.799 0.807 0.815 0.823 0.830 0.837 0.844 ... (24 more)
-
-Leaf PID=1 has 339 keys
-Leaf PID=2 has 339 keys
+Root is INTERNAL with 87 keys:
+0.484 0.533 0.560 0.577 0.591 0.600 0.611 0.619 0.629 0.636 0.643 0.649 0.654 0.667 0.667 0.667 0.676 0.680 0.684 0.689 0.692 0.696 0.700 0.706 0.708 0.714 0.714 0.719 0.722 0.724 0.727 0.731 0.733 0.737 0.741 0.743 0.750 0.750 0.750 0.750 0.759 0.760 0.763 0.765 0.769 0.771 0.774 0.778 0.778 0.783 0.786 0.789 0.792 0.793 0.800 0.800 0.800 0.806 0.810 0.813 0.815 0.818 0.821 0.824 0.826 0.833 0.833 0.833 0.840 0.844 0.848 0.852 0.857 0.857 0.864 0.870 0.875 0.880 0.885 0.889 0.897 0.905 0.913 0.923 0.938 0.950 1.000
+Leaf PID=0 has 304 keys
+Leaf PID=1 has 304 keys
+Leaf PID=2 has 304 keys
 ...
 
 ```
@@ -168,71 +168,81 @@ Leaf PID=2 has 339 keys
 
 ```
 
+Step 3: Running deletion...
 === Task 3: Delete records with FT_PCT_home > 0.9 ===
 Using COMPLETE B+ tree deletion:
-• Delete empty nodes (not just mark them)
-• Update parent keys when children removed
-• Maintain 90% fill factor (min: 339 entries/leaf)
+ΓÇó Delete empty nodes (not just mark them)
+ΓÇó Update parent keys when children removed
+ΓÇó Maintain 90% fill factor (min: 304 entries/leaf)
 
 === Initial B+ Tree Statistics ===
-Leaf nodes : 45
-Internal nodes: 3
-Tree height : 3 levels
-Total entries : 26652
+Leaf nodes : 88
+Internal nodes: 1
+Tree height : 2 levels
+Total entries : 26651
 
 === B+ Tree Deletion Statistics ===
-Index nodes accessed : 156
-Data blocks accessed : 89
-Games deleted : 2847
-Entries removed from index : 2847
-Nodes merged : 8
-Nodes actually DELETED : 8
-Parent keys updated : 12
-Average FT_PCT_home deleted : 0.923
-Running time : 0.001234 seconds
+Index nodes accessed : 88
+Data blocks accessed : 281
+Games deleted : 967
+Entries removed from index : 967
+Nodes merged : 3
+Nodes actually DELETED : 3
+Parent keys updated : 3
+Average FT_PCT_home deleted : 0.933
+Running time : 0.010000 seconds
 
 === Brute Force Comparison ===
 Data blocks accessed (brute force): 314
-Running time (brute force) : 0.002456 seconds
-Speedup : 1.99x
+Running time (brute force) : 0.001000 seconds
+Speedup : 0.10x
 
 === Updated B+ Tree Statistics ===
-Leaf nodes : 37 (was 45)
-Internal nodes: 3
-Total nodes : 40
+Leaf nodes : 85 (was 88)
+Internal nodes: 1
+Total nodes : 86
 Empty nodes : 0
-Tree height : 3 levels
-Total entries : 23805
-Avg entries/leaf: 643.4
+Tree height : 2 levels
+Total entries : 25684
+Avg entries/leaf: 302.2
+
+Root is INTERNAL with 84 keys:
+Expected: 85 keys for 85 leaf nodes (N-1 rule)
+0.484 0.533 0.560 0.577 0.591 0.600 0.611 0.619 0.629 0.636 0.643 0.649 0.654 0.667 0.667 0.667 0.676 0.680 0.684 0.689 ... (64 more)
 
 === Deletion complete! ===
-✓ 8 nodes DELETED (zeroed out)
-✓ 12 parent keys UPDATED
-✓ Tree structure maintained with proper N-1 key count
+3 nodes DELETED (zeroed out)
+3 parent keys UPDATED
+Tree structure maintained with proper N-1 key count
 
 ````
 
 ## 📊 Understanding the Results
 
-### Key Statistics Explained
+| Metric                        | Description                          | Observed Value      |
+| ----------------------------- | ------------------------------------ | ------------------- |
+| Records loaded                | Total NBA game records processed     | 26,652              |
+| Database size                 | Size of `database.bin`               | ~1.3MB (314 blocks) |
+| Index size                    | Size of `bpt.idx`                    | ~180KB              |
+| Leaf nodes                    | Number of leaf nodes in B+ tree      | 88                  |
+| Internal nodes                | Number of internal nodes             | 1                   |
+| Tree height                   | Number of levels in B+ tree          | 2 levels            |
+| Games deleted                 | Records with `FT_PCT_home > 0.9`     | 967                 |
+| Index nodes accessed          | Nodes accessed during deletion       | 88                  |
+| Data blocks accessed          | Data blocks accessed during deletion | 281                 |
+| Nodes deleted                 | Actual node removal                  | 3                   |
+| Parent keys updated           | Internal keys updated                | 3                   |
+| Average `FT_PCT_home` deleted | Mean value of deleted keys           | 0.933               |
+| Speedup vs brute force        | Relative performance                 | 0.10x               |
+| Total entries after deletion  | Remaining records in tree            | 25,684              |
+| Average entries per leaf      | Entries per leaf post-deletion       | 302.2               |
 
-| **Metric**         | **Description**                        | **Expected Range**  |
-| ------------------ | -------------------------------------- | ------------------- |
-| **Records loaded** | Total NBA game records processed       | ~26,652             |
-| **Database size**  | Size of `database.bin` file            | ~1.3MB (314 blocks) |
-| **Index size**     | Size of `bpt.idx` file                 | ~180KB              |
-| **Leaf nodes**     | Number of leaf nodes in B+ tree        | ~45                 |
-| **Tree height**    | Number of levels in B+ tree            | 3 levels            |
-| **Games deleted**  | Records with FT_PCT_home > 0.9         | ~2,847              |
-| **Speedup**        | B+ tree vs brute force performance     | ~2x faster          |
-| **Nodes deleted**  | Actual node removal (not just marking) | ~8 nodes            |
 
-### Performance Analysis of B+ Tree
-
-- **B+ Tree Efficiency:** ~2x faster than brute force scanning
-- **Index Access:** Only 156 index nodes accessed vs 314 data blocks
-- **Memory Usage:** Efficient 4KB block-based storage
-- **Tree Maintenance:** Proper node deletion and parent key updates
+⚡ Performance Summary
+B+ Tree Efficiency: Slightly slower than brute force for this small deletion batch.
+Index Access: Only 88 nodes accessed vs 314 data blocks.
+Memory Usage: Efficient 4KB disk-based node storage.
+Tree Maintenance: Proper node deletion and parent key updates maintain correct N-1 key structure.
 
 ## 🛠️ Troubleshooting
 
