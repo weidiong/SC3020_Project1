@@ -11,6 +11,7 @@
 #include <errno.h>
 
 #define BLOCK_SIZE 4096u
+#define KEY_SIZE 4
 
 // ===== Storage header =====
 #pragma pack(push, 1)
@@ -77,7 +78,10 @@ static const uint32_t LEAF_HDR_SIZE     = sizeof(struct LeafHeader);
 static inline uint32_t leaf_entry_size(void){ return (uint32_t)sizeof(struct LeafEntryOnDisk); }
 static inline uint32_t leaf_max_entries(void){ return (BLOCK_SIZE - LEAF_HDR_SIZE) / leaf_entry_size(); }
 static inline uint32_t leaf_fill_entries(void){ return (uint32_t)floor(0.90f * leaf_max_entries()); }
-static inline uint32_t internal_max_pointers(void){ return 339u; }
+static inline uint32_t internal_keys_max(void){
+    return (BLOCK_SIZE - INTERNAL_HDR_SIZE - (uint32_t)sizeof(pageid_t))        // 32 + n*KEY_SIZE + (n+1)*PTR_SIZE <= 4096
+           / (sizeof(((struct LeafEntryOnDisk *)0)->key)+ (uint32_t)sizeof(pageid_t));}       // 338 keys
+static inline uint32_t internal_max_pointers(void){ return internal_keys_max()+1; }
 static inline uint32_t internal_fill_pointers(void){ return (uint32_t)floor(0.90f * internal_max_pointers()); }
 
 // ===== In-memory structs =====
