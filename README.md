@@ -174,52 +174,83 @@ Leaf PID=2 has 304 keys
 <summary>🗑️ Click to view deletion statistics output</summary>
 
 ```
-Step 3: Running deletion...
+Step 3: Running deletion task...
 === Task 3: Delete records with FT_PCT_home > 0.9 ===
-Using COMPLETE B+ tree deletion:
-• Delete empty nodes (not just mark them)
-• Update parent keys when children removed
-• Maintain 90% fill factor (min: 304 entries/leaf)
+
+Comparing two deletion methods:
+  Method 1: INDEX-BASED SEARCH (optimized)
+  Method 2: SEQUENTIAL SCAN (original)
+  ΓÇó Both delete empty nodes and update parent keys
+  ΓÇó Both maintain 90% fill factor (min: 304 entries/leaf)
+
+Saving initial database and index state...
 
 === Initial B+ Tree Statistics ===
-Leaf nodes : 88
+Leaf nodes    : 88
 Internal nodes: 1
-Tree height : 2 levels
+Tree height   : 2 levels
 Total entries : 26651
 
-=== B+ Tree Deletion Statistics ===
-Index nodes accessed : 88
-Data blocks accessed : 281
-Games deleted : 967
-Entries removed from index : 967
-Nodes merged : 3
-Nodes actually DELETED : 3
-Parent keys updated : 3
-Average FT_PCT_home deleted : 0.933
-Running time : 0.010000 seconds
+===============================================================
+         METHOD 1: INDEX-BASED SEARCH
+===============================================================
 
-=== Brute Force Comparison ===
-Data blocks accessed (brute force): 314
-Running time (brute force) : 0.001000 seconds
-Speedup : 0.10x
+=== Index-Based Search Statistics ===
+Index nodes accessed         : 8
+Data blocks accessed         : 281
+Games deleted                : 967
+Entries removed from index   : 967
+Nodes merged                 : 3
+Nodes actually DELETED       : 3
+Parent keys updated          : 3
+Average FT_PCT_home deleted  : 0.933
+Running time                 : 0.004000 seconds
 
-=== Updated B+ Tree Statistics ===
-Leaf nodes : 85 (was 88)
-Internal nodes: 1
-Total nodes : 86
-Empty nodes : 0
-Tree height : 2 levels
-Total entries : 25684
-Avg entries/leaf: 302.2
+=== Final B+ Tree State (Method 1) ===
+Leaf nodes    : 85 (was 88)
+Total entries : 25684 (was 26651)
+
+===============================================================
+         METHOD 2: SEQUENTIAL SCAN
+===============================================================
+Restoring database to initial state...
+
+
+=== Sequential Scan Statistics ===
+Index nodes accessed         : 89
+Data blocks accessed         : 281
+Games deleted                : 967
+Entries removed from index   : 967
+Nodes merged                 : 3
+Nodes actually DELETED       : 3
+Parent keys updated          : 3
+Average FT_PCT_home deleted  : 0.933
+Running time                 : 0.005000 seconds
+
+=== Final B+ Tree State (Method 2) ===
+Leaf nodes    : 85 (was 88)
+Total entries : 25684 (was 26651)
 
 Root is INTERNAL with 84 keys:
 Expected: 85 keys for 85 leaf nodes (N-1 rule)
 0.484 0.533 0.560 0.577 0.591 0.600 0.611 0.619 0.629 0.636 0.643 0.649 0.654 0.667 0.667 0.667 0.676 0.680 0.684 0.689 ... (64 more)
 
-=== Deletion complete! ===
-3 nodes DELETED (zeroed out)
-3 parent keys UPDATED
-Tree structure maintained with proper N-1 key count
+===============================================================
+                    COMPARISON
+===============================================================
+Metric                             Index-Based      Sequential     Improvement
+------------------------------   -------------   -------------   -------------
+Index nodes accessed:                        8              89          11.12x
+Data blocks accessed:                      281             281           1.00x
+Running time:                      0.004000s     0.005000s           1.25x
+
+=== Brute Force Baseline ===
+Data blocks accessed: 314
+Running time        : 0.000000 seconds
+
+=== Comparison complete! ===
+Index-based search is 1.25x faster than sequential scan
+Index-based search accesses 11.12x fewer index nodes
 ```
 
 </details>
