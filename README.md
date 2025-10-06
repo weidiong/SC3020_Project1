@@ -260,7 +260,7 @@ Index-based search accesses 11.12x fewer index nodes
 ## ⚡ Performance Summary
 
 - **B+ Tree Efficiency:** Slightly slower than brute force for this small deletion batch
-- **Index Access:** Only 88 nodes accessed vs 314 data blocks
+- **Index Access:** 8 nodes vs 89 nodes accessed for index based access
 - **Memory Usage:** Efficient 4KB disk-based node storage
 - **Tree Maintenance:** Proper node deletion and parent key updates maintain correct N-1 key structure
 
