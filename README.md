@@ -79,44 +79,26 @@ cl /O2 /std:c11 deletion.c /Fe:deletion.exe
 .\deletion.exe database.bin bpt.idx
 ```
 
-#### Option B: Using VS Code Terminal
+####  Option B: Using Makefile (Recommended for Linux / WSL / macOS)
 
-1. Open VS Code terminal (` Ctrl + ``  `)
-2. Initialize MSVC environment:
+If you're using **WSL**, **macOS**, or **Linux**, you can automate the entire workflow with the included **Makefile**.
 
-```cmd
-cmd /k "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+### Build All Programs
+
+```bash
+make all       # compile everything
+```
+### Build and Run All Programs
+```
+make run-all   # run the 3 stages automatically
 ```
 
-### 3. Build All Programs
+### Clean Build Artifacts
 
-```cmd
-cl /O2 storage.c /Fe:storage.exe
-cl /O2 B+tree.c /Fe:build_bpt.exe
-cl /O2 deletion.c /Fe:deletion.exe
+```
+make clean     # optional cleanup
 ```
 
-### 4. Run Complete Workflow
-
-```cmd
-# Step 1: Load data into database
-storage.exe
-
-# Step 2: Build B+ tree index
-build_bpt.exe database.bin bpt.idx
-
-# Step 3: Delete records and show statistics
-deletion.exe database.bin bpt.idx
-```
-
-## 🔧 Additional Build Commands
-
-### Windows (MSVC)
-
-```cmd
-# Clean build
-del *.exe *.obj
-```
 
 ## 🎯 Expected Output
 
@@ -204,7 +186,7 @@ Nodes merged                 : 3
 Nodes actually DELETED       : 3
 Parent keys updated          : 3
 Average FT_PCT_home deleted  : 0.933
-Running time                 : 0.004000 seconds
+Running time                 : 0.010000 seconds
 
 === Final B+ Tree State (Method 1) ===
 Leaf nodes    : 85 (was 88)
@@ -225,7 +207,7 @@ Nodes merged                 : 3
 Nodes actually DELETED       : 3
 Parent keys updated          : 3
 Average FT_PCT_home deleted  : 0.933
-Running time                 : 0.005000 seconds
+Running time                 : 0.011000 seconds
 
 === Final B+ Tree State (Method 2) ===
 Leaf nodes    : 85 (was 88)
@@ -242,14 +224,14 @@ Metric                             Index-Based      Sequential     Improvement
 ------------------------------   -------------   -------------   -------------
 Index nodes accessed:                        8              89          11.12x
 Data blocks accessed:                      281             281           1.00x
-Running time:                      0.004000s     0.005000s           1.25x
+Running time:                      0.010000s     0.011000s           1.10x
 
 === Brute Force Baseline ===
 Data blocks accessed: 314
-Running time        : 0.000000 seconds
+Running time        : 0.001000 seconds
 
 === Comparison complete! ===
-Index-based search is 1.25x faster than sequential scan
+Index-based search is 1.10x faster than sequential scan
 Index-based search accesses 11.12x fewer index nodes
 ```
 
