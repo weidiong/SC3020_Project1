@@ -729,9 +729,9 @@ int main(int argc, char **argv) {
     
     // ========== METHOD 1: INDEX-BASED SEARCH ==========
     printf("\n");
-    printf("═══════════════════════════════════════════════════════\n");
+    printf("===============================================================\n");
     printf("         METHOD 1: INDEX-BASED SEARCH\n");
-    printf("═══════════════════════════════════════════════════════\n");
+    printf("===============================================================\n");
     
     struct DeletionStats stats1 = {0};
     stats1.method_name = "Index-Based Search";
@@ -769,9 +769,9 @@ int main(int argc, char **argv) {
     
     // ========== METHOD 2: SEQUENTIAL SCAN ==========
     printf("\n");
-    printf("═══════════════════════════════════════════════════════\n");
+    printf("===============================================================\n");
     printf("         METHOD 2: SEQUENTIAL SCAN\n");
-    printf("═══════════════════════════════════════════════════════\n");
+    printf("===============================================================\n");
     printf("Restoring database to initial state...\n\n");
     
     // Restore files
@@ -815,9 +815,9 @@ int main(int argc, char **argv) {
     
     // ========== COMPARISON ==========
     printf("\n");
-    printf("═══════════════════════════════════════════════════════\n");
+    printf("===============================================================\n");
     printf("                    COMPARISON\n");
-    printf("═══════════════════════════════════════════════════════\n");
+    printf("===============================================================\n");
     printf("%-30s %15s %15s %15s\n", "Metric", "Index-Based", "Sequential", "Improvement");
     printf("%-30s %15s %15s %15s\n", "------------------------------", "-------------", "-------------", "-------------");
     printf("%-30s %15llu %15llu %14.2fx\n", "Index nodes accessed:", 
